@@ -156,7 +156,17 @@ if st.button("Generate Schedule"):
   else:
     r_keys = list(base_r_entries.keys())
     modified_r_entries = base_r_entries.copy()
-    all_active_pool = [p for p in all_people if p != absent_person]
+
+    # Determine if absent person is Mechanic or Electrician
+    is_mechanic_absent = absent_person in all_mechanics
+
+    # Define primary and secondary pools based on category priority
+    if is_mechanic_absent:
+      primary_pool_base = [m for m in all_mechanics if m != absent_person]
+      secondary_pool_base = list(all_electricians)
+    else:
+      primary_pool_base = [e for e in all_electricians if e != absent_person]
+      secondary_pool_base = list(all_mechanics)
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
@@ -176,41 +186,46 @@ if st.button("Generate Schedule"):
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
           strict_busy_people.update([next_p1, next_p2])
 
-        # Also check special round members if R5
+        # Check special round members if R5
         special_busy = set()
         if r_key.startswith("R5"):
           special_busy.update(special_members)
 
-        # Priority 1: Completely free from adjacent shifts AND special round
-        ideal_candidates = [
-            p
-            for p in all_active_pool
-            if p not in strict_busy_people and p not in special_busy
-        ]
-
-        # Priority 2: If no one is completely free, allow special round members, BUT NEVER allow adjacent shift workers (Strict Rule)
-        if not ideal_candidates:
-          ideal_candidates = [
-              p for p in all_active_pool if p not in strict_busy_people
+        # Function to filter available candidates from a given pool
+        def get_valid_candidates(pool):
+          return [
+              p
+              for p in pool
+              if p not in strict_busy_people and p not in special_busy
           ]
 
-        # Fallback absolute safety (if extreme constraints happen)
-        if not ideal_candidates:
-          ideal_candidates = [
-              p for p in all_active_pool if p != other_person
-          ]
+        # Priority 1: Check primary pool (same category) with strict rules
+        valid_candidates = get_valid_candidates(primary_pool_base)
 
-        replacement = ideal_candidates[
+        # Priority 2: If no one in primary pool, check secondary pool (other category) with strict rules
+        if not valid_candidates:
+          valid_candidates = get_valid_candidates(secondary_pool_base)
+
+        # Fallback 1: Allow special round members if still no candidate, but NEVER adjacent shifts
+        if not valid_candidates:
+          def get_fallback_candidates(pool):
+            return [p for p in pool if p not in strict_busy_people]
+
+          valid_candidates = get_fallback_candidates(primary_pool_base)
+          if not valid_candidates:
+            valid_candidates = get_fallback_candidates(secondary_pool_base)
+
+        # Absolute fallback
+        if not valid_candidates:
+          valid_candidates = [p for p in all_people if p != absent_person and p != other_person]
+
+        replacement = valid_candidates[
             (
                 hash(r_key)
                 + day
-                + (
-                    1
-                    if absent_person in all_mechanics
-                    else len(all_mechanics)
-                )
+                + (1 if is_mechanic_absent else len(all_mechanics))
             )
-            % len(ideal_candidates)
+            % len(valid_candidates)
         ]
 
         if absent_person == p1:
@@ -220,7 +235,7 @@ if st.button("Generate Schedule"):
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{replacement}** replaced the absent person."
+            f"- In **{r_key}**, **{replacement}** (from same/secondary pool) replaced the absent person."
         )
 
     schedule_data = {
