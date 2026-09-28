@@ -106,7 +106,6 @@ round_times = {
     "R6": "4pm-6pm",
 }
 
-# Base default special round members for fallback pattern display
 default_special_members_list = [
     ["M2", "M3", "E1", "E3"],  # Day 1
     ["M3", "M4", "E2", "E4"],  # Day 2
@@ -119,7 +118,6 @@ default_special_members_list = [
 
 # Generate Schedule button
 if st.button("Generate Schedule"):
-  # 1. Calculate base and standard daily schedule
   base_r_entries = {}
   for r in range(1, 7):
     m_idx = (r - 1 + (day - 1)) % 5
@@ -131,12 +129,11 @@ if st.button("Generate Schedule"):
   report_messages = []
 
   if has_absence == "No":
-    # Normal day schedule
     default_special = default_special_members_list[
         (day - 1) % len(default_special_members_list)
     ]
     special_str = ", ".join(default_special)
-    
+
     schedule_data = {
         "Day": [f"Day {day}"],
         "Date": [date_str],
@@ -161,7 +158,16 @@ if st.button("Generate Schedule"):
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
-    # STEP 1: Fix regular rounds with strict constraints (No same shift, no before, no after)
+    # Helper function to count how many shifts a person currently has in modified_r_entries
+    def get_person_shift_count(person, current_schedule):
+      count = 0
+      for r_k, p_str in current_schedule.items():
+        p1, p2 = p_str.split("-")
+        if person == p1 or person == p2:
+          count += 1
+      return count
+
+    # STEP 1: Fix regular rounds with strict constraints and least-load priority
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
@@ -169,7 +175,6 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
-        # Strict busy people for regular rounds: other person + adjacent shifts (before and after)
         strict_busy = {other_person}
         if i > 0:
           prev_p1, prev_p2 = modified_r_entries[r_keys[i - 1]].split("-")
@@ -179,29 +184,22 @@ if st.button("Generate Schedule"):
           strict_busy.update([next_p1, next_p2])
 
         def get_strict_candidates(pool):
-          return [p for p in pool if p not in strict_busy]
+          return [p for p in pool if p not in strict_busy and p != absent_person]
 
-        # Priority 1: Primary category pool with strict no-adjacent rule
         valid_candidates = get_strict_candidates(primary_pool_base)
-
-        # Priority 2: Secondary category pool with strict no-adjacent rule
         if not valid_candidates:
           valid_candidates = get_strict_candidates(secondary_pool_base)
 
-        # Fallback if no one found without adjacent shifts
         if not valid_candidates:
-          valid_candidates = [p for p in primary_pool_base if p != other_person]
+          valid_candidates = [p for p in primary_pool_base if p != other_person and p != absent_person]
           if not valid_candidates:
-            valid_candidates = [p for p in secondary_pool_base if p != other_person]
+            valid_candidates = [p for p in secondary_pool_base if p != other_person and p != absent_person]
 
-        replacement = valid_candidates[
-            (
-                hash(r_key)
-                + day
-                + (1 if is_mechanic_absent else len(all_mechanics))
-            )
-            % len(valid_candidates)
-        ]
+        # Select the candidate who has the LOWEST number of shifts so far today (Least-load priority)
+        replacement = min(
+            valid_candidates,
+            key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
+        )
 
         if absent_person == p1:
           new_pair = f"{replacement}-{other_person}"
@@ -213,40 +211,38 @@ if st.button("Generate Schedule"):
             f"- In **{r_key}**, **{replacement}** replaced the absent person."
         )
 
-    # STEP 2: Build Special Round dynamically from remaining available people after regular shifts are set
-    # Get all people working in R5 (2pm-4pm) from modified regular schedule
+    # STEP 2: Build Special Round dynamically from remaining available people
     r5_key = [k for k in r_keys if "R5" in k][0]
     r5_workers = modified_r_entries[r5_key].split("-")
 
-    # People available for special round: anyone not working in R5 regular shift and not absent
     available_for_special = [
         p for p in all_people if p not in r5_workers and p != absent_person
     ]
 
-    # Sub-divide into mechanics and electricians for balanced special round selection
     avail_m = [p for p in available_for_special if p in all_mechanics]
     avail_e = [p for p in available_for_special if p in all_electricians]
-
-    # Select 2 mechanics and 2 electricians preferentially who are not in R4 or R6 (adjacent to R5)
-    def pick_special(pool, count, r4_workers, r6_workers):
-      # Priority 1: Not in R4 and not in R6
-      perfect = [
-          p for p in pool if p not in r4_workers and p not in r6_workers
-      ]
-      # Priority 2: Allowed to be in R4 or R6 if needed
-      fallback = [p for p in pool if p not in perfect]
-      combined = perfect + fallback
-      return combined[:count]
 
     r4_key = [k for k in r_keys if "R4" in k][0]
     r6_key = [k for k in r_keys if "R6" in k][0]
     r4_workers = modified_r_entries[r4_key].split("-")
     r6_workers = modified_r_entries[r6_key].split("-")
 
-    chosen_m = pick_special(avail_m, 2, r4_workers, r6_workers)
-    chosen_e = pick_special(avail_e, 2, r4_workers, r6_workers)
+    def pick_special(pool, count):
+      perfect = [
+          p for p in pool if p not in r4_workers and p not in r6_workers
+      ]
+      fallback = [p for p in pool if p not in perfect]
+      combined = perfect + fallback
+      # Sort by shift count (least-load) then role name
+      combined_sorted = sorted(
+          combined,
+          key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
+      )
+      return combined_sorted[:count]
 
-    # If we lack members due to strict counts, pull from general available pool
+    chosen_m = pick_special(avail_m, 2)
+    chosen_e = pick_special(avail_e, 2)
+
     if len(chosen_m) < 2:
       extra_m = [
           p
