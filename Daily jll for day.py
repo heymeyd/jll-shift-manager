@@ -106,7 +106,8 @@ round_times = {
     "R6": "4pm-6pm",
 }
 
-special_round_members_list = [
+# Base default special round members for fallback pattern display
+default_special_members_list = [
     ["M2", "M3", "E1", "E3"],  # Day 1
     ["M3", "M4", "E2", "E4"],  # Day 2
     ["M4", "M5", "E3", "E5"],  # Day 3
@@ -114,14 +115,6 @@ special_round_members_list = [
     ["M1", "M2", "E2", "E5"],  # Day 5
     ["M2", "M3", "E1", "E3"],  # Day 6
     ["M3", "M4", "E2", "E4"],  # Day 7
-]
-
-special_round_patterns = [
-    "M2, M3 & E1, E3",
-    "M3, M4 & E2, E4",
-    "M4, M5 & E3, E5",
-    "M1, M5 & E1, E4",
-    "M1, M2 & E2, E5",
 ]
 
 # Generate Schedule button
@@ -135,14 +128,15 @@ if st.button("Generate Schedule"):
     col_name = f"R{r} ({round_times[f'R{r}']})"
     base_r_entries[col_name] = f"{all_mechanics[m_idx]}-{all_electricians[e_idx]}"
 
-  special_str = special_round_patterns[(day - 1) % len(special_round_patterns)]
-  special_members = special_round_members_list[
-      (day - 1) % len(special_round_members_list)
-  ]
-
   report_messages = []
 
   if has_absence == "No":
+    # Normal day schedule
+    default_special = default_special_members_list[
+        (day - 1) % len(default_special_members_list)
+    ]
+    special_str = ", ".join(default_special)
+    
     schedule_data = {
         "Day": [f"Day {day}"],
         "Date": [date_str],
@@ -167,57 +161,38 @@ if st.button("Generate Schedule"):
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
+    # STEP 1: Fix regular rounds with strict constraints (No same shift, no before, no after)
     for i, r_key in enumerate(r_keys):
-      pair_str = base_r_entries[r_key]
+      pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
 
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
-        # Strict check for same shift and special round (R5)
-        # Everyone in special round is busy during R5
-        special_busy = set(special_members)
-
-        # Adjacent shifts check (before and after)
-        adjacent_busy = set()
+        # Strict busy people for regular rounds: other person + adjacent shifts (before and after)
+        strict_busy = {other_person}
         if i > 0:
-          prev_p1, prev_p2 = base_r_entries[r_keys[i - 1]].split("-")
-          adjacent_busy.update([prev_p1, prev_p2])
+          prev_p1, prev_p2 = modified_r_entries[r_keys[i - 1]].split("-")
+          strict_busy.update([prev_p1, prev_p2])
         if i < len(r_keys) - 1:
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
-          adjacent_busy.update([next_p1, next_p2])
+          strict_busy.update([next_p1, next_p2])
 
-        def filter_candidates(pool, respect_adjacent):
-          candidates = []
-          for p in pool:
-            # Must not be the other person in the same shift
-            if p == other_person:
-              continue
-            # Must not be busy in special round during R5
-            if p in special_busy:
-              continue
-            # If respect_adjacent is True, must not be busy in before/after shifts
-            if respect_adjacent and p in adjacent_busy:
-              continue
-            candidates.append(p)
-          return candidates
+        def get_strict_candidates(pool):
+          return [p for p in pool if p not in strict_busy]
 
-        # STEP 1: Try primary pool (same category) with full rest preference (no adjacent shift)
-        valid_candidates = filter_candidates(primary_pool_base, respect_adjacent=True)
+        # Priority 1: Primary category pool with strict no-adjacent rule
+        valid_candidates = get_strict_candidates(primary_pool_base)
 
-        # STEP 2: If none in primary pool with full rest, try secondary pool with full rest
+        # Priority 2: Secondary category pool with strict no-adjacent rule
         if not valid_candidates:
-          valid_candidates = filter_candidates(secondary_pool_base, respect_adjacent=True)
+          valid_candidates = get_strict_candidates(secondary_pool_base)
 
-        # STEP 3: If still none, relax the adjacent shift rule (allow working before/after), but KEEP special round and same-shift protection
+        # Fallback if no one found without adjacent shifts
         if not valid_candidates:
-          valid_candidates = filter_candidates(primary_pool_base, respect_adjacent=False)
-        if not valid_candidates:
-          valid_candidates = filter_candidates(secondary_pool_base, respect_adjacent=False)
-
-        # Absolute fallback if everything else fails
-        if not valid_candidates:
-          valid_candidates = [p for p in all_people if p != absent_person and p != other_person]
+          valid_candidates = [p for p in primary_pool_base if p != other_person]
+          if not valid_candidates:
+            valid_candidates = [p for p in secondary_pool_base if p != other_person]
 
         replacement = valid_candidates[
             (
@@ -237,6 +212,62 @@ if st.button("Generate Schedule"):
         report_messages.append(
             f"- In **{r_key}**, **{replacement}** replaced the absent person."
         )
+
+    # STEP 2: Build Special Round dynamically from remaining available people after regular shifts are set
+    # Get all people working in R5 (2pm-4pm) from modified regular schedule
+    r5_key = [k for k in r_keys if "R5" in k][0]
+    r5_workers = modified_r_entries[r5_key].split("-")
+
+    # People available for special round: anyone not working in R5 regular shift and not absent
+    available_for_special = [
+        p for p in all_people if p not in r5_workers and p != absent_person
+    ]
+
+    # Sub-divide into mechanics and electricians for balanced special round selection
+    avail_m = [p for p in available_for_special if p in all_mechanics]
+    avail_e = [p for p in available_for_special if p in all_electricians]
+
+    # Select 2 mechanics and 2 electricians preferentially who are not in R4 or R6 (adjacent to R5)
+    def pick_special(pool, count, r4_workers, r6_workers):
+      # Priority 1: Not in R4 and not in R6
+      perfect = [
+          p for p in pool if p not in r4_workers and p not in r6_workers
+      ]
+      # Priority 2: Allowed to be in R4 or R6 if needed
+      fallback = [p for p in pool if p not in perfect]
+      combined = perfect + fallback
+      return combined[:count]
+
+    r4_key = [k for k in r_keys if "R4" in k][0]
+    r6_key = [k for k in r_keys if "R6" in k][0]
+    r4_workers = modified_r_entries[r4_key].split("-")
+    r6_workers = modified_r_entries[r6_key].split("-")
+
+    chosen_m = pick_special(avail_m, 2, r4_workers, r6_workers)
+    chosen_e = pick_special(avail_e, 2, r4_workers, r6_workers)
+
+    # If we lack members due to strict counts, pull from general available pool
+    if len(chosen_m) < 2:
+      extra_m = [
+          p
+          for p in all_mechanics
+          if p not in chosen_m
+          and p not in r5_workers
+          and p != absent_person
+      ]
+      chosen_m += extra_m[: 2 - len(chosen_m)]
+    if len(chosen_e) < 2:
+      extra_e = [
+          p
+          for p in all_electricians
+          if p not in chosen_e
+          and p not in r5_workers
+          and p != absent_person
+      ]
+      chosen_e += extra_e[: 2 - len(chosen_e)]
+
+    chosen_special = sorted(chosen_m) + sorted(chosen_e)
+    special_str = ", ".join(chosen_special)
 
     schedule_data = {
         "Day": [f"Day {day}"],
