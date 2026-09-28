@@ -11,6 +11,26 @@ st.write(
     "Enter the date to calculate the schedule and track absent coverages."
 )
 
+# Team Names Mapping Table inside Sidebar
+st.sidebar.markdown("### 👥 Team Members Reference")
+team_data = {
+    "Role": ["M1", "M2", "M3", "M4", "M5", "E1", "E2", "E3", "E4", "E5"],
+    "Name": [
+        "Anthony",
+        "Hamed",
+        "Tony",
+        "Jimmy",
+        "Maleek",
+        "Darrison",
+        "Daniel",
+        "Jon",
+        "Trey",
+        "Ronald",
+    ],
+}
+df_team = pd.DataFrame(team_data)
+st.sidebar.table(df_team)
+
 
 # Function to calculate cycle day
 def get_day_number_from_date(target_date):
