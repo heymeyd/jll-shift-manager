@@ -157,10 +157,7 @@ if st.button("Generate Schedule"):
     r_keys = list(base_r_entries.keys())
     modified_r_entries = base_r_entries.copy()
 
-    # Determine if absent person is Mechanic or Electrician
     is_mechanic_absent = absent_person in all_mechanics
-
-    # Define primary and secondary pools based on category priority
     if is_mechanic_absent:
       primary_pool_base = [m for m in all_mechanics if m != absent_person]
       secondary_pool_base = list(all_electricians)
@@ -177,45 +174,48 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
-        # Strict check for adjacent shifts and same shift
-        strict_busy_people = {other_person}
+        # Strict check for same shift and special round (R5)
+        # Everyone in special round is busy during R5
+        special_busy = set(special_members)
+
+        # Adjacent shifts check (before and after)
+        adjacent_busy = set()
         if i > 0:
           prev_p1, prev_p2 = base_r_entries[r_keys[i - 1]].split("-")
-          strict_busy_people.update([prev_p1, prev_p2])
+          adjacent_busy.update([prev_p1, prev_p2])
         if i < len(r_keys) - 1:
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
-          strict_busy_people.update([next_p1, next_p2])
+          adjacent_busy.update([next_p1, next_p2])
 
-        # Check special round members if R5
-        special_busy = set()
-        if r_key.startswith("R5"):
-          special_busy.update(special_members)
+        def filter_candidates(pool, respect_adjacent):
+          candidates = []
+          for p in pool:
+            # Must not be the other person in the same shift
+            if p == other_person:
+              continue
+            # Must not be busy in special round during R5
+            if p in special_busy:
+              continue
+            # If respect_adjacent is True, must not be busy in before/after shifts
+            if respect_adjacent and p in adjacent_busy:
+              continue
+            candidates.append(p)
+          return candidates
 
-        # Function to filter available candidates from a given pool
-        def get_valid_candidates(pool):
-          return [
-              p
-              for p in pool
-              if p not in strict_busy_people and p not in special_busy
-          ]
+        # STEP 1: Try primary pool (same category) with full rest preference (no adjacent shift)
+        valid_candidates = filter_candidates(primary_pool_base, respect_adjacent=True)
 
-        # Priority 1: Check primary pool (same category) with strict rules
-        valid_candidates = get_valid_candidates(primary_pool_base)
-
-        # Priority 2: If no one in primary pool, check secondary pool (other category) with strict rules
+        # STEP 2: If none in primary pool with full rest, try secondary pool with full rest
         if not valid_candidates:
-          valid_candidates = get_valid_candidates(secondary_pool_base)
+          valid_candidates = filter_candidates(secondary_pool_base, respect_adjacent=True)
 
-        # Fallback 1: Allow special round members if still no candidate, but NEVER adjacent shifts
+        # STEP 3: If still none, relax the adjacent shift rule (allow working before/after), but KEEP special round and same-shift protection
         if not valid_candidates:
-          def get_fallback_candidates(pool):
-            return [p for p in pool if p not in strict_busy_people]
+          valid_candidates = filter_candidates(primary_pool_base, respect_adjacent=False)
+        if not valid_candidates:
+          valid_candidates = filter_candidates(secondary_pool_base, respect_adjacent=False)
 
-          valid_candidates = get_fallback_candidates(primary_pool_base)
-          if not valid_candidates:
-            valid_candidates = get_fallback_candidates(secondary_pool_base)
-
-        # Absolute fallback
+        # Absolute fallback if everything else fails
         if not valid_candidates:
           valid_candidates = [p for p in all_people if p != absent_person and p != other_person]
 
@@ -235,7 +235,7 @@ if st.button("Generate Schedule"):
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{replacement}** (from same/secondary pool) replaced the absent person."
+            f"- In **{r_key}**, **{replacement}** replaced the absent person."
         )
 
     schedule_data = {
