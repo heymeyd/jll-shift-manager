@@ -106,7 +106,6 @@ round_times = {
     "R6": "4pm-6pm",
 }
 
-# Mapping of special round members for each cycle day (Index 0 for Day 1, etc.)
 special_round_members_list = [
     ["M2", "M3", "E1", "E3"],  # Day 1
     ["M3", "M4", "E2", "E4"],  # Day 2
@@ -136,9 +135,10 @@ if st.button("Generate Schedule"):
     col_name = f"R{r} ({round_times[f'R{r}']})"
     base_r_entries[col_name] = f"{all_mechanics[m_idx]}-{all_electricians[e_idx]}"
 
-  special_str = special_round_patterns[(day - 1) % 5]
-  # Get members involved in the special round for this specific day cycle (1-based index to 0-based)
-  special_members = special_round_members_list[(day - 1) % len(special_round_members_list)]
+  special_str = special_round_patterns[(day - 1) % len(special_round_patterns)]
+  special_members = special_round_members_list[
+      (day - 1) % len(special_round_members_list)
+  ]
 
   report_messages = []
 
@@ -167,33 +167,38 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
-        # Collect busy people: other person in same shift, adjacent shifts, AND special round members if R5
-        busy_people = {other_person}
+        # Strict check for adjacent shifts and same shift
+        strict_busy_people = {other_person}
         if i > 0:
           prev_p1, prev_p2 = base_r_entries[r_keys[i - 1]].split("-")
-          busy_people.update([prev_p1, prev_p2])
+          strict_busy_people.update([prev_p1, prev_p2])
         if i < len(r_keys) - 1:
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
-          busy_people.update([next_p1, next_p2])
-        
-        # If this is R5, also exclude members assigned to the Special Round
-        if r_key.startswith("R5"):
-          busy_people.update(special_members)
+          strict_busy_people.update([next_p1, next_p2])
 
+        # Also check special round members if R5
+        special_busy = set()
+        if r_key.startswith("R5"):
+          special_busy.update(special_members)
+
+        # Priority 1: Completely free from adjacent shifts AND special round
         ideal_candidates = [
-            p for p in all_active_pool if p not in busy_people
+            p
+            for p in all_active_pool
+            if p not in strict_busy_people and p not in special_busy
         ]
 
+        # Priority 2: If no one is completely free, allow special round members, BUT NEVER allow adjacent shift workers (Strict Rule)
         if not ideal_candidates:
-          fallback_candidates = [
-              p
-              for p in all_active_pool
-              if p != other_person
-              and p not in base_r_entries[r_key].split("-")
+          ideal_candidates = [
+              p for p in all_active_pool if p not in strict_busy_people
           ]
-          ideal_candidates = (
-              fallback_candidates if fallback_candidates else all_active_pool
-          )
+
+        # Fallback absolute safety (if extreme constraints happen)
+        if not ideal_candidates:
+          ideal_candidates = [
+              p for p in all_active_pool if p != other_person
+          ]
 
         replacement = ideal_candidates[
             (
