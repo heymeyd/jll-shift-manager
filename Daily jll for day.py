@@ -149,16 +149,16 @@ if st.button("Generate Schedule"):
     modified_r_entries = base_r_entries.copy()
 
     is_mechanic_absent = absent_person in all_mechanics
+    # Primary pool is now anyone from the same category OR flexible pool, prioritizing same category
     if is_mechanic_absent:
-      primary_pool_base = [m for m in all_mechanics if m != absent_person]
-      secondary_pool_base = list(all_electricians)
+      same_category_pool = all_mechanics
+      other_category_pool = all_electricians
     else:
-      primary_pool_base = [e for e in all_electricians if e != absent_person]
-      secondary_pool_base = list(all_mechanics)
+      same_category_pool = all_electricians
+      other_category_pool = all_mechanics
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
-    # Helper function to count how many shifts a person currently has in modified_r_entries
     def get_person_shift_count(person, current_schedule):
       count = 0
       for r_k, p_str in current_schedule.items():
@@ -167,7 +167,7 @@ if st.button("Generate Schedule"):
           count += 1
       return count
 
-    # STEP 1: Fix regular rounds with strict constraints and least-load priority
+    # STEP 1: Fix regular rounds allowing MM, EE, or ME flexible pairs with least-load priority and rest constraints
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
@@ -175,6 +175,7 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
+        # Strict busy: other person + adjacent shifts (before and after)
         strict_busy = {other_person}
         if i > 0:
           prev_p1, prev_p2 = modified_r_entries[r_keys[i - 1]].split("-")
@@ -183,19 +184,25 @@ if st.button("Generate Schedule"):
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
           strict_busy.update([next_p1, next_p2])
 
-        def get_strict_candidates(pool):
-          return [p for p in pool if p not in strict_busy and p != absent_person]
+        # Candidates from same category first, then other category
+        def get_candidates(pool):
+          return [
+              p for p in pool
+              if p not in strict_busy and p != absent_person and p != other_person
+          ]
 
-        valid_candidates = get_strict_candidates(primary_pool_base)
+        valid_candidates = get_candidates(same_category_pool)
         if not valid_candidates:
-          valid_candidates = get_strict_candidates(secondary_pool_base)
+          valid_candidates = get_candidates(other_category_pool)
 
+        # Fallback if strict adjacency blocks everyone
         if not valid_candidates:
-          valid_candidates = [p for p in primary_pool_base if p != other_person and p != absent_person]
+          fallback_busy = {other_person, absent_person}
+          valid_candidates = [p for p in same_category_pool if p not in fallback_busy]
           if not valid_candidates:
-            valid_candidates = [p for p in secondary_pool_base if p != other_person and p != absent_person]
+            valid_candidates = [p for p in other_category_pool if p not in fallback_busy]
 
-        # Select the candidate who has the LOWEST number of shifts so far today (Least-load priority)
+        # Pick the candidate with the LEAST shifts so far today to prevent overworking one person
         replacement = min(
             valid_candidates,
             key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
@@ -208,7 +215,7 @@ if st.button("Generate Schedule"):
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{replacement}** replaced the absent person."
+            f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
         )
 
     # STEP 2: Build Special Round dynamically from remaining available people
@@ -233,7 +240,6 @@ if st.button("Generate Schedule"):
       ]
       fallback = [p for p in pool if p not in perfect]
       combined = perfect + fallback
-      # Sort by shift count (least-load) then role name
       combined_sorted = sorted(
           combined,
           key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
