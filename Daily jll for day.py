@@ -106,6 +106,25 @@ round_times = {
     "R6": "4pm-6pm",
 }
 
+# Mapping of special round members for each cycle day (Index 0 for Day 1, etc.)
+special_round_members_list = [
+    ["M2", "M3", "E1", "E3"],  # Day 1
+    ["M3", "M4", "E2", "E4"],  # Day 2
+    ["M4", "M5", "E3", "E5"],  # Day 3
+    ["M1", "M5", "E1", "E4"],  # Day 4
+    ["M1", "M2", "E2", "E5"],  # Day 5
+    ["M2", "M3", "E1", "E3"],  # Day 6
+    ["M3", "M4", "E2", "E4"],  # Day 7
+]
+
+special_round_patterns = [
+    "M2, M3 & E1, E3",
+    "M3, M4 & E2, E4",
+    "M4, M5 & E3, E5",
+    "M1, M5 & E1, E4",
+    "M1, M2 & E2, E5",
+]
+
 # Generate Schedule button
 if st.button("Generate Schedule"):
   # 1. Calculate base and standard daily schedule
@@ -117,14 +136,9 @@ if st.button("Generate Schedule"):
     col_name = f"R{r} ({round_times[f'R{r}']})"
     base_r_entries[col_name] = f"{all_mechanics[m_idx]}-{all_electricians[e_idx]}"
 
-  special_round_patterns = [
-      "M2, M3 & E1, E3",
-      "M3, M4 & E2, E4",
-      "M4, M5 & E3, E5",
-      "M1, M5 & E1, E4",
-      "M1, M2 & E2, E5",
-  ]
   special_str = special_round_patterns[(day - 1) % 5]
+  # Get members involved in the special round for this specific day cycle (1-based index to 0-based)
+  special_members = special_round_members_list[(day - 1) % len(special_round_members_list)]
 
   report_messages = []
 
@@ -153,6 +167,7 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
+        # Collect busy people: other person in same shift, adjacent shifts, AND special round members if R5
         busy_people = {other_person}
         if i > 0:
           prev_p1, prev_p2 = base_r_entries[r_keys[i - 1]].split("-")
@@ -160,6 +175,10 @@ if st.button("Generate Schedule"):
         if i < len(r_keys) - 1:
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
           busy_people.update([next_p1, next_p2])
+        
+        # If this is R5, also exclude members assigned to the Special Round
+        if r_key.startswith("R5"):
+          busy_people.update(special_members)
 
         ideal_candidates = [
             p for p in all_active_pool if p not in busy_people
