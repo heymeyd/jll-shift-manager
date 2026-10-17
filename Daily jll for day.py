@@ -209,10 +209,6 @@ if st.button("Generate Schedule"):
 
     # STEP 2: Handle absence if the absent person was in R5 (simultaneous round workers)
     if absent_person in r5_workers_list:
-      # Find a replacement for R5 workers list based on your exact rule:
-      # - Has < 2 shifts today (< 2 shifts total)
-      # - Not working in that round concurrently (R5 itself)
-      # - Rest rule: Not working in R4 (before) and R6 (after)
       r4_key = [k for k in r_keys if "R4" in k][0]
       r6_key = [k for k in r_keys if "R6" in k][0]
       r4_workers = modified_r_entries[r4_key].split("-")
@@ -225,8 +221,8 @@ if st.button("Generate Schedule"):
           if p not in rest_busy and get_person_shift_count(p, modified_r_entries, []) < 2
       ]
 
-      if not available_for_new := available_for_r5_replacement:
-        # Fallback if strict rest restricts everyone
+      available_for_new = available_for_r5_replacement
+      if not available_for_new:
         available_for_new = [p for p in all_people if p != absent_person and p not in r5_workers_list]
 
       replacement_r5 = min(
