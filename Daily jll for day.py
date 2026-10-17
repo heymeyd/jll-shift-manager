@@ -236,7 +236,7 @@ if st.button("Generate Schedule"):
       )
 
       r5_workers_list = [replacement_r5 if w == absent_person_code else w for w in r5_workers_list]
-      report_messages.append(f"- In **Simultaneous R5 Round**, **{name_mapping[replacement_r5]}** replaced absent **{name_mapping[absent_person_code]}**.")
+      report_messages.append(f"- In **Special Round**, **{name_mapping[replacement_r5]}** replaced absent **{name_mapping[absent_person_code]}**.")
 
   # Replace codes with real names for display in schedule
   named_r_entries = {}
@@ -244,13 +244,13 @@ if st.button("Generate Schedule"):
     p1, p2 = v.split("-")
     named_r_entries[k] = f"{name_mapping[p1]} - {name_mapping[p2]}"
 
-  updated_r5_names = f"{name_mapping[r5_workers_list[0]]} - {name_mapping[r5_workers_list[1]]}"
+  updated_r5_names = f"{name_mapping[r5_workers_list[0]} - {name_mapping[r5_workers_list[1]]}"
 
   schedule_data = {
       "Day": [f"Day {day}"],
       "Date": [date_str],
       "Absent Person": [name_mapping[absent_person_code] if has_absence == "Yes" else "None"],
-      "Simultaneous R5 (2pm-4pm)": [updated_r5_names],
+      "Special Round": [updated_r5_names],
       **{k: [v] for k, v in named_r_entries.items()},
   }
 
