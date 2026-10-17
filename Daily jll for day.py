@@ -142,7 +142,6 @@ if st.button("Generate Schedule"):
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
-    # STEP 1: Fix regular rounds allowing MM, EE, or ME flexible pairs with max 2 shifts per person limit
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
@@ -201,12 +200,13 @@ if st.button("Generate Schedule"):
             f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
         )
 
-  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am) - Fairly balanced between M and E
+  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am) with strict fairness and rest rules
   r1_key = r_keys[0] # R1
   r2_key = r_keys[1] # R2
   r1_workers = modified_r_entries[r1_key].split("-")
   r2_workers = modified_r_entries[r2_key].split("-")
 
+  # Strict exclusions: Must not be in R1, must not be in R2, must not have >= 2 shifts already, must not be absent
   excluded_for_new_round = set(r1_workers + r2_workers)
   if has_absence == "Yes" and absent_person:
     excluded_for_new_round.add(absent_person)
@@ -217,28 +217,38 @@ if st.button("Generate Schedule"):
       and get_person_shift_count(p, modified_r_entries) < 2
   ]
 
-  avail_m_new = sorted(
-      [p for p in available_for_new if p in all_mechanics],
-      key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
-  )
-  avail_e_new = sorted(
-      [p for p in available_for_new if p in all_electricians],
+  # If we need 2 people for the simultaneous round, let's pick them fairly prioritizing those with fewer shifts in total or balanced rotation
+  # We can sort available people by how many shifts they currently have, and then alphabetically/rotationally
+  sorted_available = sorted(
+      available_for_new,
       key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
   )
 
-  # Fair rotation based on day number to balance M and E selections
-  if day % 2 == 1:
-    m_choice = avail_m_new[(day - 1) % len(avail_m_new)] if avail_m_new else "M1"
-    rem_avail = [p for p in available_for_new if p != m_choice]
-    rem_e = sorted([p for p in rem_avail if p in all_electricians], key=lambda p: (get_person_shift_count(p, modified_r_entries), p))
-    e_choice = rem_e[0] if rem_e else ("E1" if rem_avail[0] != m_choice else rem_avail[1])
-    new_round_str = f"{m_choice}-{e_choice}"
-  else:
-    e_choice = avail_e_new[(day - 1) % len(avail_e_new)] if avail_e_new else "E1"
-    rem_avail = [p for p in available_for_new if p != e_choice]
-    rem_m = sorted([p for p in rem_avail if p in all_mechanics], key=lambda p: (get_person_shift_count(p, modified_r_entries), p))
-    m_choice = rem_m[0] if rem_m else "M1"
-    new_round_str = f"{m_choice}-{e_choice}"
+  # To ensure fairness and mix M and E if possible in the 2-person slot:
+  selected_new_members = []
+  
+  # Try to pick one M and one E if available from sorted list
+  m_candidates = [p for p in sorted_available if p in all_mechanics]
+  e_candidates = [p for p in sorted_available if p in all_electricians]
+
+  if m_candidates:
+    selected_new_members.append(m_candidates[0])
+  if e_candidates:
+    selected_new_members.append(e_candidates[0])
+
+  # If we still need members (e.g., categories exhausted), grab next best from sorted_available
+  for p in sorted_available:
+    if len(selected_new_members) < 2 and p not in selected_new_members:
+      selected_new_members.append(p)
+
+  if len(selected_new_members) < 2:
+    # Absolute fallback if pool is too restricted
+    fallback_pool = [p for p in all_people if p not in excluded_for_new_round]
+    for p in fallback_pool:
+      if len(selected_new_members) < 2 and p not in selected_new_members:
+        selected_new_members.append(p)
+
+  new_round_str = f"{selected_new_members[0]}-{selected_new_members[1]}" if len(selected_new_members) >= 2 else "M1-E1"
 
   # Construct final display data
   schedule_data = {
