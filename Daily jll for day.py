@@ -106,16 +106,6 @@ round_times = {
     "R6": "4pm-6pm",
 }
 
-default_special_members_list = [
-    ["M2", "M3", "E1", "E3"],  # Day 1
-    ["M3", "M4", "E2", "E4"],  # Day 2
-    ["M4", "M5", "E3", "E5"],  # Day 3
-    ["M1", "M5", "E1", "E4"],  # Day 4
-    ["M1", "M2", "E2", "E5"],  # Day 5
-    ["M2", "M3", "E1", "E3"],  # Day 6
-    ["M3", "M4", "E2", "E4"],  # Day 7
-]
-
 # Generate Schedule button
 if st.button("Generate Schedule"):
   base_r_entries = {}
@@ -128,28 +118,21 @@ if st.button("Generate Schedule"):
 
   report_messages = []
 
+  def get_person_shift_count(person, current_schedule):
+    count = 0
+    for r_k, p_str in current_schedule.items():
+      p1, p2 = p_str.split("-")
+      if person == p1 or person == p2:
+        count += 1
+    return count
+
+  r_keys = list(base_r_entries.keys())
+  modified_r_entries = base_r_entries.copy()
+
   if has_absence == "No":
-    default_special = default_special_members_list[
-        (day - 1) % len(default_special_members_list)
-    ]
-    special_str = ", ".join(default_special)
-
-    schedule_data = {
-        "Day": [f"Day {day}"],
-        "Date": [date_str],
-        "Absent Person": ["None"],
-        **{k: [v] for k, v in base_r_entries.items()},
-        "Special R5 (2pm-4pm)": [special_str],
-    }
-    report_messages.append(
-        "No one is absent today. The schedule runs normally."
-    )
+    report_messages.append("No one is absent today. The schedule runs normally.")
   else:
-    r_keys = list(base_r_entries.keys())
-    modified_r_entries = base_r_entries.copy()
-
     is_mechanic_absent = absent_person in all_mechanics
-    # Primary pool is now anyone from the same category OR flexible pool, prioritizing same category
     if is_mechanic_absent:
       same_category_pool = all_mechanics
       other_category_pool = all_electricians
@@ -159,15 +142,7 @@ if st.button("Generate Schedule"):
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
-    def get_person_shift_count(person, current_schedule):
-      count = 0
-      for r_k, p_str in current_schedule.items():
-        p1, p2 = p_str.split("-")
-        if person == p1 or person == p2:
-          count += 1
-      return count
-
-    # STEP 1: Fix regular rounds allowing MM, EE, or ME flexible pairs with least-load priority and rest constraints
+    # STEP 1: Fix regular rounds allowing MM, EE, or ME flexible pairs with max 2 shifts per person limit
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
@@ -175,7 +150,6 @@ if st.button("Generate Schedule"):
       if absent_person == p1 or absent_person == p2:
         other_person = p2 if absent_person == p1 else p1
 
-        # Strict busy: other person + adjacent shifts (before and after)
         strict_busy = {other_person}
         if i > 0:
           prev_p1, prev_p2 = modified_r_entries[r_keys[i - 1]].split("-")
@@ -184,25 +158,34 @@ if st.button("Generate Schedule"):
           next_p1, next_p2 = base_r_entries[r_keys[i + 1]].split("-")
           strict_busy.update([next_p1, next_p2])
 
-        # Candidates from same category first, then other category
         def get_candidates(pool):
           return [
               p for p in pool
-              if p not in strict_busy and p != absent_person and p != other_person
+              if p not in strict_busy 
+              and p != absent_person 
+              and p != other_person
+              and get_person_shift_count(p, modified_r_entries) < 2  # Hard limit: max 2 shifts per day
           ]
 
         valid_candidates = get_candidates(same_category_pool)
         if not valid_candidates:
           valid_candidates = get_candidates(other_category_pool)
 
-        # Fallback if strict adjacency blocks everyone
         if not valid_candidates:
           fallback_busy = {other_person, absent_person}
-          valid_candidates = [p for p in same_category_pool if p not in fallback_busy]
+          valid_candidates = [
+              p for p in same_category_pool 
+              if p not in fallback_busy and get_person_shift_count(p, modified_r_entries) < 2
+          ]
           if not valid_candidates:
-            valid_candidates = [p for p in other_category_pool if p not in fallback_busy]
+            valid_candidates = [
+                p for p in other_category_pool 
+                if p not in fallback_busy and get_person_shift_count(p, modified_r_entries) < 2
+            ]
 
-        # Pick the candidate with the LEAST shifts so far today to prevent overworking one person
+        if not valid_candidates:
+          valid_candidates = [p for p in all_people if p != absent_person and p != other_person]
+
         replacement = min(
             valid_candidates,
             key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
@@ -218,66 +201,48 @@ if st.button("Generate Schedule"):
             f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
         )
 
-    # STEP 2: Build Special Round dynamically from remaining available people
-    r5_key = [k for k in r_keys if "R5" in k][0]
-    r5_workers = modified_r_entries[r5_key].split("-")
+  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am)
+  # Must not be in R1 and must not be in R2 (8am-10am), max 2 shifts per day limit
+  r1_key = r_keys[0] # R1
+  r2_key = r_keys[1] # R2
+  r1_workers = modified_r_entries[r1_key].split("-")
+  r2_workers = modified_r_entries[r2_key].split("-")
 
-    available_for_special = [
-        p for p in all_people if p not in r5_workers and p != absent_person
-    ]
+  excluded_for_new_round = set(r1_workers + r2_workers)
+  if has_absence == "Yes" and absent_person:
+    excluded_for_new_round.add(absent_person)
 
-    avail_m = [p for p in available_for_special if p in all_mechanics]
-    avail_e = [p for p in available_for_special if p in all_electricians]
+  available_for_new = [
+      p for p in all_people 
+      if p not in excluded_for_new_round 
+      and get_person_shift_count(p, modified_r_entries) < 2
+  ]
 
-    r4_key = [k for k in r_keys if "R4" in k][0]
-    r6_key = [k for k in r_keys if "R6" in k][0]
-    r4_workers = modified_r_entries[r4_key].split("-")
-    r6_workers = modified_r_entries[r6_key].split("-")
+  # Pick 2 people for the new 6am-8am round (e.g. 1 mechanic, 1 electrician if possible, sorted by least load)
+  avail_m_new = sorted(
+      [p for p in available_for_new if p in all_mechanics],
+      key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
+  )
+  avail_e_new = sorted(
+      [p for p in available_for_new if p in all_electricians],
+      key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
+  )
 
-    def pick_special(pool, count):
-      perfect = [
-          p for p in pool if p not in r4_workers and p not in r6_workers
-      ]
-      fallback = [p for p in pool if p not in perfect]
-      combined = perfect + fallback
-      combined_sorted = sorted(
-          combined,
-          key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
-      )
-      return combined_sorted[:count]
+  new_member1 = avail_m_new[0] if avail_m_new else (avail_e_new[0] if avail_e_new else "M1")
+  # Try to pick second member from different category or next best
+  remaining_avail = [p for p in available_for_new if p != new_member1]
+  new_member2 = remaining_avail[0] if remaining_avail else "E1"
 
-    chosen_m = pick_special(avail_m, 2)
-    chosen_e = pick_special(avail_e, 2)
+  new_round_str = f"{new_member1}-{new_member2}"
 
-    if len(chosen_m) < 2:
-      extra_m = [
-          p
-          for p in all_mechanics
-          if p not in chosen_m
-          and p not in r5_workers
-          and p != absent_person
-      ]
-      chosen_m += extra_m[: 2 - len(chosen_m)]
-    if len(chosen_e) < 2:
-      extra_e = [
-          p
-          for p in all_electricians
-          if p not in chosen_e
-          and p not in r5_workers
-          and p != absent_person
-      ]
-      chosen_e += extra_e[: 2 - len(chosen_e)]
-
-    chosen_special = sorted(chosen_m) + sorted(chosen_e)
-    special_str = ", ".join(chosen_special)
-
-    schedule_data = {
-        "Day": [f"Day {day}"],
-        "Date": [date_str],
-        "Absent Person": [absent_person],
-        **{k: [v] for k, v in modified_r_entries.items()},
-        "Special R5 (2pm-4pm)": [special_str],
-    }
+  # Construct final display data
+  schedule_data = {
+      "Day": [f"Day {day}"],
+      "Date": [date_str],
+      "Absent Person": [absent_person if has_absence == "Yes" else "None"],
+      "Simultaneous R1 (6am-8am)": [new_round_str],
+      **{k: [v] for k, v in modified_r_entries.items()},
+  }
 
   df = pd.DataFrame(schedule_data)
 
