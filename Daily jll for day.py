@@ -153,7 +153,9 @@ if st.button("Generate Schedule"):
       same_category_pool = all_electricians
       other_category_pool = all_mechanics
 
-    report_messages.append(f"Today, **{name_mapping[absent_person_code]}** is absent.")
+    report_messages.append(
+        f"Today, **{name_mapping[absent_person_code]}** is absent."
+    )
 
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
@@ -172,11 +174,15 @@ if st.button("Generate Schedule"):
 
         def get_candidates(pool):
           return [
-              p for p in pool
-              if p not in strict_busy 
-              and p != absent_person_code 
+              p
+              for p in pool
+              if p not in strict_busy
+              and p != absent_person_code
               and p != other_person
-              and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
+              and get_person_shift_count(
+                  p, modified_r_entries, r5_workers_list
+              )
+              < 2
           ]
 
         valid_candidates = get_candidates(same_category_pool)
@@ -186,21 +192,38 @@ if st.button("Generate Schedule"):
         if not valid_candidates:
           fallback_busy = {other_person, absent_person_code}
           valid_candidates = [
-              p for p in same_category_pool 
-              if p not in fallback_busy and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
+              p
+              for p in same_category_pool
+              if p not in fallback_busy
+              and get_person_shift_count(
+                  p, modified_r_entries, r5_workers_list
+              )
+              < 2
           ]
           if not valid_candidates:
             valid_candidates = [
-                p for p in other_category_pool 
-                if p not in fallback_busy and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
+                p
+                for p in other_category_pool
+                if p not in fallback_busy
+                and get_person_shift_count(
+                    p, modified_r_entries, r5_workers_list
+                )
+                < 2
             ]
 
         if not valid_candidates:
-          valid_candidates = [p for p in all_people if p != absent_person_code and p != other_person]
+          valid_candidates = [
+              p
+              for p in all_people
+              if p != absent_person_code and p != other_person
+          ]
 
         replacement = min(
             valid_candidates,
-            key=lambda p: (get_person_shift_count(p, modified_r_entries, r5_workers_list), p),
+            key=lambda p: (
+                get_person_shift_count(p, modified_r_entries, r5_workers_list),
+                p,
+            ),
         )
 
         if absent_person_code == p1:
@@ -210,7 +233,8 @@ if st.button("Generate Schedule"):
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{name_mapping[replacement]}** replaced the absent person."
+            f"- In **{r_key}**, **{name_mapping[replacement]}** replaced the"
+            " absent person."
         )
 
     if absent_person_code in r5_workers_list:
@@ -219,24 +243,38 @@ if st.button("Generate Schedule"):
       r4_workers = modified_r_entries[r4_key].split("-")
       r6_workers = modified_r_entries[r6_key].split("-")
 
-      rest_busy = set(r4_workers + r6_workers + r5_workers_list + [absent_person_code])
+      rest_busy = set(
+          r4_workers + r6_workers + r5_workers_list + [absent_person_code]
+      )
 
       available_for_r5_replacement = [
-          p for p in all_people
-          if p not in rest_busy and get_person_shift_count(p, modified_r_entries, []) < 2
+          p
+          for p in all_people
+          if p not in rest_busy
+          and get_person_shift_count(p, modified_r_entries, []) < 2
       ]
 
       available_for_new = available_for_r5_replacement
       if not available_for_new:
-        available_for_new = [p for p in all_people if p != absent_person_code and p not in r5_workers_list]
+        available_for_new = [
+            p
+            for p in all_people
+            if p != absent_person_code and p not in r5_workers_list
+        ]
 
       replacement_r5 = min(
           available_for_new,
-          key=lambda p: (get_person_shift_count(p, modified_r_entries, []), p)
+          key=lambda p: (get_person_shift_count(p, modified_r_entries, []), p),
       )
 
-      r5_workers_list = [replacement_r5 if w == absent_person_code else w for w in r5_workers_list]
-      report_messages.append(f"- In **Special Round**, **{name_mapping[replacement_r5]}** replaced absent **{name_mapping[absent_person_code]}**.")
+      r5_workers_list = [
+          replacement_r5 if w == absent_person_code else w
+          for w in r5_workers_list
+      ]
+      report_messages.append(
+          f"- In **Special Round**, **{name_mapping[replacement_r5]}**"
+          f" replaced absent **{name_mapping[absent_person_code]}**."
+      )
 
   # Replace codes with real names for display in schedule
   named_r_entries = {}
@@ -244,12 +282,17 @@ if st.button("Generate Schedule"):
     p1, p2 = v.split("-")
     named_r_entries[k] = f"{name_mapping[p1]} - {name_mapping[p2]}"
 
-  updated_r5_names = f"{name_mapping[r5_workers_list[0]} - {name_mapping[r5_workers_list[1]]}"
+  updated_r5_names = (
+      f"{name_mapping[r5_workers_list[0]]} -"
+      f" {name_mapping[r5_workers_list[1]]}"
+  )
 
   schedule_data = {
       "Day": [f"Day {day}"],
       "Date": [date_str],
-      "Absent Person": [name_mapping[absent_person_code] if has_absence == "Yes" else "None"],
+      "Absent Person": [
+          name_mapping[absent_person_code] if has_absence == "Yes" else "None"
+      ],
       "Special Round": [updated_r5_names],
       **{k: [v] for k, v in named_r_entries.items()},
   }
