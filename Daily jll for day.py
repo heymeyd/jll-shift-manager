@@ -118,16 +118,22 @@ if st.button("Generate Schedule"):
 
   report_messages = []
 
-  def get_person_shift_count(person, current_schedule):
+  def get_person_shift_count(person, current_schedule, r5_workers=None):
     count = 0
     for r_k, p_str in current_schedule.items():
       p1, p2 = p_str.split("-")
       if person == p1 or person == p2:
         count += 1
+    if r5_workers and person in r5_workers:
+      count += 1
     return count
 
   r_keys = list(base_r_entries.keys())
   modified_r_entries = base_r_entries.copy()
+
+  # R5 workers for simultaneous round
+  r5_key = [k for k in r_keys if "R5" in k][0]
+  r5_workers_list = modified_r_entries[r5_key].split("-")
 
   if has_absence == "No":
     report_messages.append("No one is absent today. The schedule runs normally.")
@@ -142,6 +148,7 @@ if st.button("Generate Schedule"):
 
     report_messages.append(f"Today, **{absent_person}** is absent.")
 
+    # STEP 1: Replace absent person in regular rounds with strict rules
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
@@ -163,7 +170,7 @@ if st.button("Generate Schedule"):
               if p not in strict_busy 
               and p != absent_person 
               and p != other_person
-              and get_person_shift_count(p, modified_r_entries) < 2
+              and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
           ]
 
         valid_candidates = get_candidates(same_category_pool)
@@ -174,12 +181,12 @@ if st.button("Generate Schedule"):
           fallback_busy = {other_person, absent_person}
           valid_candidates = [
               p for p in same_category_pool 
-              if p not in fallback_busy and get_person_shift_count(p, modified_r_entries) < 2
+              if p not in fallback_busy and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
           ]
           if not valid_candidates:
             valid_candidates = [
                 p for p in other_category_pool 
-                if p not in fallback_busy and get_person_shift_count(p, modified_r_entries) < 2
+                if p not in fallback_busy and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
             ]
 
         if not valid_candidates:
@@ -187,7 +194,7 @@ if st.button("Generate Schedule"):
 
         replacement = min(
             valid_candidates,
-            key=lambda p: (get_person_shift_count(p, modified_r_entries), p),
+            key=lambda p: (get_person_shift_count(p, modified_r_entries, r5_workers_list), p),
         )
 
         if absent_person == p1:
@@ -197,19 +204,47 @@ if st.button("Generate Schedule"):
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
+            f"- In **{r_key}**, **{replacement}** replaced the absent person."
         )
 
-  # STEP 2: Simultaneous Round (Concurrent with R1: 6am-8am) populated by R5 workers
-  r5_key = [k for k in r_keys if "R5" in k][0]
-  r5_workers = modified_r_entries[r5_key]
+    # STEP 2: Handle absence if the absent person was in R5 (simultaneous round workers)
+    if absent_person in r5_workers_list:
+      # Find a replacement for R5 workers list based on your exact rule:
+      # - Has < 2 shifts today (< 2 shifts total)
+      # - Not working in that round concurrently (R5 itself)
+      # - Rest rule: Not working in R4 (before) and R6 (after)
+      r4_key = [k for k in r_keys if "R4" in k][0]
+      r6_key = [k for k in r_keys if "R6" in k][0]
+      r4_workers = modified_r_entries[r4_key].split("-")
+      r6_workers = modified_r_entries[r6_key].split("-")
+
+      rest_busy = set(r4_workers + r6_workers + r5_workers_list + [absent_person])
+
+      available_for_r5_replacement = [
+          p for p in all_people
+          if p not in rest_busy and get_person_shift_count(p, modified_r_entries, []) < 2
+      ]
+
+      if not available_for_new := available_for_r5_replacement:
+        # Fallback if strict rest restricts everyone
+        available_for_new = [p for p in all_people if p != absent_person and p not in r5_workers_list]
+
+      replacement_r5 = min(
+          available_for_new,
+          key=lambda p: (get_person_shift_count(p, modified_r_entries, []), p)
+      )
+
+      r5_workers_list = [replacement_r5 if w == absent_person else w for w in r5_workers_list]
+      report_messages.append(f"- In **Simultaneous R5 Round**, **{replacement_r5}** replaced absent **{absent_person}**.")
+
+  updated_r5_str = f"{r5_workers_list[0]}-{r5_workers_list[1]}"
 
   # Construct final display data
   schedule_data = {
       "Day": [f"Day {day}"],
       "Date": [date_str],
       "Absent Person": [absent_person if has_absence == "Yes" else "None"],
-      "Simultaneous R1 (6am-8am)": [r5_workers],
+      "Simultaneous R5 (2pm-4pm)": [updated_r5_str],
       **{k: [v] for k, v in modified_r_entries.items()},
   }
 
