@@ -164,7 +164,7 @@ if st.button("Generate Schedule"):
               if p not in strict_busy 
               and p != absent_person 
               and p != other_person
-              and get_person_shift_count(p, modified_r_entries) < 2  # Hard limit: max 2 shifts per day
+              and get_person_shift_count(p, modified_r_entries) < 2
           ]
 
         valid_candidates = get_candidates(same_category_pool)
@@ -201,8 +201,7 @@ if st.button("Generate Schedule"):
             f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
         )
 
-  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am)
-  # Must not be in R1 and must not be in R2 (8am-10am), max 2 shifts per day limit
+  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am) - Fairly balanced between M and E
   r1_key = r_keys[0] # R1
   r2_key = r_keys[1] # R2
   r1_workers = modified_r_entries[r1_key].split("-")
@@ -218,7 +217,6 @@ if st.button("Generate Schedule"):
       and get_person_shift_count(p, modified_r_entries) < 2
   ]
 
-  # Pick 2 people for the new 6am-8am round (e.g. 1 mechanic, 1 electrician if possible, sorted by least load)
   avail_m_new = sorted(
       [p for p in available_for_new if p in all_mechanics],
       key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
@@ -228,12 +226,19 @@ if st.button("Generate Schedule"):
       key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
   )
 
-  new_member1 = avail_m_new[0] if avail_m_new else (avail_e_new[0] if avail_e_new else "M1")
-  # Try to pick second member from different category or next best
-  remaining_avail = [p for p in available_for_new if p != new_member1]
-  new_member2 = remaining_avail[0] if remaining_avail else "E1"
-
-  new_round_str = f"{new_member1}-{new_member2}"
+  # Fair rotation based on day number to balance M and E selections
+  if day % 2 == 1:
+    m_choice = avail_m_new[(day - 1) % len(avail_m_new)] if avail_m_new else "M1"
+    rem_avail = [p for p in available_for_new if p != m_choice]
+    rem_e = sorted([p for p in rem_avail if p in all_electricians], key=lambda p: (get_person_shift_count(p, modified_r_entries), p))
+    e_choice = rem_e[0] if rem_e else ("E1" if rem_avail[0] != m_choice else rem_avail[1])
+    new_round_str = f"{m_choice}-{e_choice}"
+  else:
+    e_choice = avail_e_new[(day - 1) % len(avail_e_new)] if avail_e_new else "E1"
+    rem_avail = [p for p in available_for_new if p != e_choice]
+    rem_m = sorted([p for p in rem_avail if p in all_mechanics], key=lambda p: (get_person_shift_count(p, modified_r_entries), p))
+    m_choice = rem_m[0] if rem_m else "M1"
+    new_round_str = f"{m_choice}-{e_choice}"
 
   # Construct final display data
   schedule_data = {
