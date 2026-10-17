@@ -200,62 +200,16 @@ if st.button("Generate Schedule"):
             f"- In **{r_key}**, **{replacement}** replaced the absent person (flexible pair)."
         )
 
-  # STEP 2: Build New Simultaneous Round (Concurrent with R1: 6am-8am) with strict fairness and rest rules
-  r1_key = r_keys[0] # R1
-  r2_key = r_keys[1] # R2
-  r1_workers = modified_r_entries[r1_key].split("-")
-  r2_workers = modified_r_entries[r2_key].split("-")
-
-  # Strict exclusions: Must not be in R1, must not be in R2, must not have >= 2 shifts already, must not be absent
-  excluded_for_new_round = set(r1_workers + r2_workers)
-  if has_absence == "Yes" and absent_person:
-    excluded_for_new_round.add(absent_person)
-
-  available_for_new = [
-      p for p in all_people 
-      if p not in excluded_for_new_round 
-      and get_person_shift_count(p, modified_r_entries) < 2
-  ]
-
-  # If we need 2 people for the simultaneous round, let's pick them fairly prioritizing those with fewer shifts in total or balanced rotation
-  # We can sort available people by how many shifts they currently have, and then alphabetically/rotationally
-  sorted_available = sorted(
-      available_for_new,
-      key=lambda p: (get_person_shift_count(p, modified_r_entries), p)
-  )
-
-  # To ensure fairness and mix M and E if possible in the 2-person slot:
-  selected_new_members = []
-  
-  # Try to pick one M and one E if available from sorted list
-  m_candidates = [p for p in sorted_available if p in all_mechanics]
-  e_candidates = [p for p in sorted_available if p in all_electricians]
-
-  if m_candidates:
-    selected_new_members.append(m_candidates[0])
-  if e_candidates:
-    selected_new_members.append(e_candidates[0])
-
-  # If we still need members (e.g., categories exhausted), grab next best from sorted_available
-  for p in sorted_available:
-    if len(selected_new_members) < 2 and p not in selected_new_members:
-      selected_new_members.append(p)
-
-  if len(selected_new_members) < 2:
-    # Absolute fallback if pool is too restricted
-    fallback_pool = [p for p in all_people if p not in excluded_for_new_round]
-    for p in fallback_pool:
-      if len(selected_new_members) < 2 and p not in selected_new_members:
-        selected_new_members.append(p)
-
-  new_round_str = f"{selected_new_members[0]}-{selected_new_members[1]}" if len(selected_new_members) >= 2 else "M1-E1"
+  # STEP 2: Simultaneous Round (Concurrent with R1: 6am-8am) populated by R5 workers
+  r5_key = [k for k in r_keys if "R5" in k][0]
+  r5_workers = modified_r_entries[r5_key]
 
   # Construct final display data
   schedule_data = {
       "Day": [f"Day {day}"],
       "Date": [date_str],
       "Absent Person": [absent_person if has_absence == "Yes" else "None"],
-      "Simultaneous R1 (6am-8am)": [new_round_str],
+      "Simultaneous R1 (6am-8am)": [r5_workers],
       **{k: [v] for k, v in modified_r_entries.items()},
   }
 
