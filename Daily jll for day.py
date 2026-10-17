@@ -11,22 +11,25 @@ st.write(
     "Enter the date to calculate the schedule and track absent coverages."
 )
 
+# Team Names Mapping
+name_mapping = {
+    "M1": "Anthony",
+    "M2": "Hamed",
+    "M3": "Tony",
+    "M4": "Jimmy",
+    "M5": "Maleek",
+    "E1": "Darrison",
+    "E2": "Daniel",
+    "E3": "Jon",
+    "E4": "Trey",
+    "E5": "Ronald",
+}
+
 # Team Names Mapping Table inside Sidebar
 st.sidebar.markdown("### 👥 Team Members Reference")
 team_data = {
-    "Role": ["M1", "M2", "M3", "M4", "M5", "E1", "E2", "E3", "E4", "E5"],
-    "Name": [
-        "Anthony",
-        "Hamed",
-        "Tony",
-        "Jimmy",
-        "Maleek",
-        "Darrison",
-        "Daniel",
-        "Jon",
-        "Trey",
-        "Ronald",
-    ],
+    "Role": list(name_mapping.keys()),
+    "Name": list(name_mapping.values()),
 }
 df_team = pd.DataFrame(team_data)
 st.sidebar.table(df_team)
@@ -93,9 +96,14 @@ all_mechanics = [f"M{i}" for i in range(1, 6)]
 all_electricians = [f"E{i}" for i in range(1, 6)]
 all_people = all_mechanics + all_electricians
 
-absent_person = None
+absent_person_code = None
 if has_absence == "Yes":
-  absent_person = st.selectbox("Select the absent person:", all_people)
+  absent_name = st.selectbox(
+      "Select the absent person:", [name_mapping[p] for p in all_people]
+  )
+  absent_person_code = [
+      k for k, v in name_mapping.items() if v == absent_name
+  ][0]
 
 round_times = {
     "R1": "6am-8am",
@@ -131,14 +139,13 @@ if st.button("Generate Schedule"):
   r_keys = list(base_r_entries.keys())
   modified_r_entries = base_r_entries.copy()
 
-  # R5 workers for simultaneous round
   r5_key = [k for k in r_keys if "R5" in k][0]
   r5_workers_list = modified_r_entries[r5_key].split("-")
 
   if has_absence == "No":
     report_messages.append("No one is absent today. The schedule runs normally.")
   else:
-    is_mechanic_absent = absent_person in all_mechanics
+    is_mechanic_absent = absent_person_code in all_mechanics
     if is_mechanic_absent:
       same_category_pool = all_mechanics
       other_category_pool = all_electricians
@@ -146,15 +153,14 @@ if st.button("Generate Schedule"):
       same_category_pool = all_electricians
       other_category_pool = all_mechanics
 
-    report_messages.append(f"Today, **{absent_person}** is absent.")
+    report_messages.append(f"Today, **{name_mapping[absent_person_code]}** is absent.")
 
-    # STEP 1: Replace absent person in regular rounds with strict rules
     for i, r_key in enumerate(r_keys):
       pair_str = modified_r_entries[r_key]
       p1, p2 = pair_str.split("-")
 
-      if absent_person == p1 or absent_person == p2:
-        other_person = p2 if absent_person == p1 else p1
+      if absent_person_code == p1 or absent_person_code == p2:
+        other_person = p2 if absent_person_code == p1 else p1
 
         strict_busy = {other_person}
         if i > 0:
@@ -168,7 +174,7 @@ if st.button("Generate Schedule"):
           return [
               p for p in pool
               if p not in strict_busy 
-              and p != absent_person 
+              and p != absent_person_code 
               and p != other_person
               and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
           ]
@@ -178,7 +184,7 @@ if st.button("Generate Schedule"):
           valid_candidates = get_candidates(other_category_pool)
 
         if not valid_candidates:
-          fallback_busy = {other_person, absent_person}
+          fallback_busy = {other_person, absent_person_code}
           valid_candidates = [
               p for p in same_category_pool 
               if p not in fallback_busy and get_person_shift_count(p, modified_r_entries, r5_workers_list) < 2
@@ -190,31 +196,30 @@ if st.button("Generate Schedule"):
             ]
 
         if not valid_candidates:
-          valid_candidates = [p for p in all_people if p != absent_person and p != other_person]
+          valid_candidates = [p for p in all_people if p != absent_person_code and p != other_person]
 
         replacement = min(
             valid_candidates,
             key=lambda p: (get_person_shift_count(p, modified_r_entries, r5_workers_list), p),
         )
 
-        if absent_person == p1:
+        if absent_person_code == p1:
           new_pair = f"{replacement}-{other_person}"
         else:
           new_pair = f"{other_person}-{replacement}"
 
         modified_r_entries[r_key] = new_pair
         report_messages.append(
-            f"- In **{r_key}**, **{replacement}** replaced the absent person."
+            f"- In **{r_key}**, **{name_mapping[replacement]}** replaced the absent person."
         )
 
-    # STEP 2: Handle absence if the absent person was in R5 (simultaneous round workers)
-    if absent_person in r5_workers_list:
+    if absent_person_code in r5_workers_list:
       r4_key = [k for k in r_keys if "R4" in k][0]
       r6_key = [k for k in r_keys if "R6" in k][0]
       r4_workers = modified_r_entries[r4_key].split("-")
       r6_workers = modified_r_entries[r6_key].split("-")
 
-      rest_busy = set(r4_workers + r6_workers + r5_workers_list + [absent_person])
+      rest_busy = set(r4_workers + r6_workers + r5_workers_list + [absent_person_code])
 
       available_for_r5_replacement = [
           p for p in all_people
@@ -223,25 +228,30 @@ if st.button("Generate Schedule"):
 
       available_for_new = available_for_r5_replacement
       if not available_for_new:
-        available_for_new = [p for p in all_people if p != absent_person and p not in r5_workers_list]
+        available_for_new = [p for p in all_people if p != absent_person_code and p not in r5_workers_list]
 
       replacement_r5 = min(
           available_for_new,
           key=lambda p: (get_person_shift_count(p, modified_r_entries, []), p)
       )
 
-      r5_workers_list = [replacement_r5 if w == absent_person else w for w in r5_workers_list]
-      report_messages.append(f"- In **Simultaneous R5 Round**, **{replacement_r5}** replaced absent **{absent_person}**.")
+      r5_workers_list = [replacement_r5 if w == absent_person_code else w for w in r5_workers_list]
+      report_messages.append(f"- In **Simultaneous R5 Round**, **{name_mapping[replacement_r5]}** replaced absent **{name_mapping[absent_person_code]}**.")
 
-  updated_r5_str = f"{r5_workers_list[0]}-{r5_workers_list[1]}"
+  # Replace codes with real names for display in schedule
+  named_r_entries = {}
+  for k, v in modified_r_entries.items():
+    p1, p2 = v.split("-")
+    named_r_entries[k] = f"{name_mapping[p1]} - {name_mapping[p2]}"
 
-  # Construct final display data
+  updated_r5_names = f"{name_mapping[r5_workers_list[0]]} - {name_mapping[r5_workers_list[1]]}"
+
   schedule_data = {
       "Day": [f"Day {day}"],
       "Date": [date_str],
-      "Absent Person": [absent_person if has_absence == "Yes" else "None"],
-      "Simultaneous R5 (2pm-4pm)": [updated_r5_str],
-      **{k: [v] for k, v in modified_r_entries.items()},
+      "Absent Person": [name_mapping[absent_person_code] if has_absence == "Yes" else "None"],
+      "Simultaneous R5 (2pm-4pm)": [updated_r5_names],
+      **{k: [v] for k, v in named_r_entries.items()},
   }
 
   df = pd.DataFrame(schedule_data)
